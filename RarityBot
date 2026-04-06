@@ -93,8 +93,15 @@ async def update_rarity_cache():
     # 2. Define the roles list for cleanup
     all_rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
     all_roles = [discord.utils.get(guild.roles, name=n) for n in all_rarity_names]
+    # Filter out 'SERVER' from the score list before calculating percentiles
+    human_scores = [s for s in scores if s[0] != "SERVER"]
+    total = len(human_scores)
 
-    for i, (user_id, score) in enumerate(scores):
+    for i, (user_id, score) in enumerate(human_scores):
+        # Now 'i' correctly represents the rank among humans, and 'total' is the count of human users
+        if user_id == "SERVER":
+            continue
+        
         percentile = i / total
         
         if percentile < 0.02:    # Top 2%
