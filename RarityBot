@@ -74,7 +74,9 @@ async def update_rarity_cache():
     
     # 1. Define the Guild immediately
     # Replace the numbers below with your actual Server ID
-    GUILD_ID = 123456789012345678  
+    # 1. NEW: Wait until the bot is fully connected to Discord
+    await bot.wait_until_ready()
+    GUILD_ID = int(os.getenv('GUILD_ID'))
     guild = bot.get_guild(GUILD_ID)
     
     if not guild:
@@ -131,8 +133,37 @@ async def update_rarity_cache():
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user.name}')
-    update_rarity_cache.start()
+    print(f'Logged in as {bot.user}')
+    
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        # Define the rarity roles we care about
+        rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
+        common_role = discord.utils.get(guild.roles, name="Common")
+        
+        if common_role:
+            print("🛠️ Genesis Sweep: Checking for unranked users...")
+            for member in guild.members:
+                if member.bot: continue
+                
+                # Check if the member already has ANY of the rarity roles
+                has_rarity = any(role.name in rarity_names for role in member.roles)
+                
+                # If they have no rarity role, they are a 'new' data point
+                if not has_rarity:
+                    await member.add_roles(common_role)
+                    print(f"✅ Assigned Common to {member.name}")
+    
+    if not update_rarity_cache.is_running():
+        update_rarity_cache.start()
+
+@bot.event
+async def on_member_join(member):
+    """Assigns Common role to new members immediately."""
+    common_role = discord.utils.get(member.guild.roles, name="Common")
+    if common_role:
+        await member.add_roles(common_role)
+        print(f"🐣 {member.name} joined the server and was assigned Common.")
 
 @bot.event
 async def on_message(message):
