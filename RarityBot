@@ -2,6 +2,12 @@ import discord
 import sqlite3
 import networkx as nx
 import asyncio
+import os
+from dotenv import load_dotenv
+# Load the variables from .env
+load_dotenv()
+# Use the environment variable
+TOKEN = os.getenv('NTc3MzExMjgyOTM2NDE0MjA4.GoWvV7.3YUBbXIj3EYElRVAGF7gWAh3foKOcz6K42EEjg')
 from discord.ext import commands, tasks
 
 # --- 1. CONFIGURATION ---
@@ -20,7 +26,7 @@ RARITY_SOUNDS = {
 # --- 2. DATABASE SETUP ---
 db = sqlite3.connect(DATABASE_FILE)
 cursor = db.cursor()
-# Added 'type' column to differentiate between MESSAGE and VC actions
+# Added 'type' column here
 cursor.execute('''CREATE TABLE IF NOT EXISTS interactions 
                (source TEXT, target TEXT, type TEXT, weight REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 db.commit()
@@ -90,11 +96,10 @@ async def on_message(message):
     if message.reference and message.reference.resolved:
         target_id = str(message.reference.resolved.author.id)
     
-    # Explicitly logging the type 'MESSAGE'
+    # Updated to include 'MESSAGE' type
     cursor.execute("INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)", 
                    (author_id, target_id, 'MESSAGE', 1.0))
     db.commit()
-    print(f"📝 Recorded message from {message.author.name}") # Debugging line
     await bot.process_commands(message)
     
 @bot.command()
@@ -109,18 +114,23 @@ async def summon(ctx):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    """The 'Entry Frag' - Plays sound based on PageRank rarity."""
+    """The 'Entry Frag' - Records the interaction and plays rarity sound."""
     if member.bot: return
     
-    # Check if user joined a channel the bot is currently in
+    # 1. TRACKING LOGIC: Record the VC Join in the DB
+    if before.channel is None and after.channel is not None:
+        # Record this as a high-weight interaction
+        cursor.execute("INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)",
+                       (str(member.id), str(after.channel.id), 'VC_JOIN', 5.0))
+        db.commit()
+        print(f"🔊 Recorded VC Join for {member.name}")
+
+    # 2. AUDIO LOGIC: Play sound if the bot is in the channel
     if before.channel is None and after.channel is not None:
         vc_client = member.guild.voice_client
         if vc_client and vc_client.channel == after.channel:
-            
-            # Lookup rarity from our Eigen-cache
             rarity = user_rarity_cache.get(str(member.id), "Common")
             sound_path = RARITY_SOUNDS.get(rarity)
-
             if sound_path and not vc_client.is_playing():
                 vc_client.play(discord.FFmpegPCMAudio(sound_path))
 
