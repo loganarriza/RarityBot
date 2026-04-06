@@ -1,0 +1,21 @@
+# verify.py
+import sqlite3
+
+def check_data():
+    conn = sqlite3.connect('rarity_data.db')
+    cursor = conn.cursor()
+    
+    print("--- LAST 5 DATABASE ENTRIES ---")
+    cursor.execute("SELECT * FROM interactions ORDER BY timestamp DESC LIMIT 5")
+    rows = cursor.fetchall()
+    
+    if not rows:
+        print("Database is empty. Go talk in the server!")
+    else:
+        for row in rows:
+            print(f"Source: {row[0]} | Target: {row[1]} | Type: {row[2]} | Weight: {row[3]} | Time: {row[4]}")
+    
+    conn.close()
+
+if __name__ == "__main__":
+    check_data()

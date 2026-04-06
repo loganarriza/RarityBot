@@ -20,8 +20,9 @@ RARITY_SOUNDS = {
 # --- 2. DATABASE SETUP ---
 db = sqlite3.connect(DATABASE_FILE)
 cursor = db.cursor()
+# Added 'type' column to differentiate between MESSAGE and VC actions
 cursor.execute('''CREATE TABLE IF NOT EXISTS interactions 
-               (source TEXT, target TEXT, weight REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+               (source TEXT, target TEXT, type TEXT, weight REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 db.commit()
 
 # --- 3. THE MATH ENGINE (PAGERANK) ---
@@ -86,15 +87,16 @@ async def on_message(message):
     author_id = str(message.author.id)
     target_id = "SERVER"
     
-    # Track 'Influence Flow' via replies
     if message.reference and message.reference.resolved:
         target_id = str(message.reference.resolved.author.id)
     
-    cursor.execute("INSERT INTO interactions (source, target, weight) VALUES (?, ?, ?)", 
-                   (author_id, target_id, 1.0))
+    # Explicitly logging the type 'MESSAGE'
+    cursor.execute("INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)", 
+                   (author_id, target_id, 'MESSAGE', 1.0))
     db.commit()
+    print(f"📝 Recorded message from {message.author.name}") # Debugging line
     await bot.process_commands(message)
-
+    
 @bot.command()
 async def summon(ctx):
     """Command to bring the bot into your current VC."""
