@@ -1,0 +1,125 @@
+import discord
+import sqlite3
+import networkx as nx
+import asyncio
+from discord.ext import commands, tasks
+
+# --- 1. CONFIGURATION ---
+TOKEN = 'YOUR_BOT_TOKEN_HERE'
+DATABASE_FILE = 'rarity_data.db'
+ALPHA = 0.85  # The Damping Factor (Probability of following a link)
+
+# Mapping Rarities to Sounds
+RARITY_SOUNDS = {
+    "Divine": "sounds/divine.mp3",
+    "Mythic": "sounds/mythic.mp3",
+    "Legendary": "sounds/legendary.mp3",
+    "Common": "sounds/common.mp3"
+}
+
+# --- 2. DATABASE SETUP ---
+db = sqlite3.connect(DATABASE_FILE)
+cursor = db.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS interactions 
+               (source TEXT, target TEXT, weight REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+db.commit()
+
+# --- 3. THE MATH ENGINE (PAGERANK) ---
+def calculate_pagerank():
+    """Calculates the Principal Eigenvector of the social graph."""
+    # Pull the last 7 days of data to keep rarities 'fresh'
+    cursor.execute("""
+        SELECT source, target, SUM(weight) 
+        FROM interactions 
+        WHERE timestamp > datetime('now', '-7 days') 
+        GROUP BY source, target
+    """)
+    data = cursor.fetchall()
+    
+    if not data:
+        return {}
+
+    G = nx.DiGraph()
+    for src, tgt, w in data:
+        G.add_edge(src, tgt, weight=w)
+    
+    # This is the Eigen-solver. It returns a dict of {user_id: score}
+    scores = nx.pagerank(G, weight='weight', alpha=ALPHA)
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+# --- 4. THE BOT LOGIC ---
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Global cache to keep VC joins fast (O(1) lookup)
+user_rarity_cache = {}
+
+@tasks.loop(hours=1)
+async def update_rarity_cache():
+    """Background task to run the Linear Algebra once an hour."""
+    global user_rarity_cache
+    scores = calculate_pagerank()
+    if not scores: return
+
+    total = len(scores)
+    new_cache = {}
+    for i, (user_id, score) in enumerate(scores):
+        percentile = i / total
+        if percentile < 0.01: rarity = "Divine"
+        elif percentile < 0.10: rarity = "Mythic"
+        elif percentile < 0.25: rarity = "Legendary"
+        else: rarity = "Common"
+        new_cache[user_id] = rarity
+    
+    user_rarity_cache = new_cache
+    print("✅ Rarity cache updated via PageRank.")
+
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user.name}')
+    update_rarity_cache.start()
+
+@bot.event
+async def on_message(message):
+    if message.author.bot: return
+    
+    author_id = str(message.author.id)
+    target_id = "SERVER"
+    
+    # Track 'Influence Flow' via replies
+    if message.reference and message.reference.resolved:
+        target_id = str(message.reference.resolved.author.id)
+    
+    cursor.execute("INSERT INTO interactions (source, target, weight) VALUES (?, ?, ?)", 
+                   (author_id, target_id, 1.0))
+    db.commit()
+    await bot.process_commands(message)
+
+@bot.command()
+async def summon(ctx):
+    """Command to bring the bot into your current VC."""
+    if ctx.author.voice:
+        channel = ctx.author.voice.channel
+        await channel.connect()
+        await ctx.send(f"👁️ The Rarity Engine has entered **{channel.name}**.")
+    else:
+        await ctx.send("Join a Voice Channel first!")
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    """The 'Entry Frag' - Plays sound based on PageRank rarity."""
+    if member.bot: return
+    
+    # Check if user joined a channel the bot is currently in
+    if before.channel is None and after.channel is not None:
+        vc_client = member.guild.voice_client
+        if vc_client and vc_client.channel == after.channel:
+            
+            # Lookup rarity from our Eigen-cache
+            rarity = user_rarity_cache.get(str(member.id), "Common")
+            sound_path = RARITY_SOUNDS.get(rarity)
+
+            if sound_path and not vc_client.is_playing():
+                vc_client.play(discord.FFmpegPCMAudio(sound_path))
+
+bot.run(TOKEN)
