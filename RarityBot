@@ -6,20 +6,26 @@ import os
 from dotenv import load_dotenv
 # Load the variables from .env
 load_dotenv()
-# Use the environment variable
-TOKEN = os.getenv('NTc3MzExMjgyOTM2NDE0MjA4.GoWvV7.3YUBbXIj3EYElRVAGF7gWAh3foKOcz6K42EEjg')
+
+TOKEN = os.getenv('DISCORD_TOKEN')
+# We wrap this in int() because .env files treat everything as text (strings), 
+# but Discord IDs must be integers for the code to work.
+GUILD_ID = int(os.getenv('GUILD_ID'))
 from discord.ext import commands, tasks
 
 # --- 1. CONFIGURATION ---
-TOKEN = 'YOUR_BOT_TOKEN_HERE'
+TOKEN = os.getenv('DISCORD_TOKEN')
+GUILD_ID = int(os.getenv('GUILD_ID'))
 DATABASE_FILE = 'rarity_data.db'
 ALPHA = 0.85  # The Damping Factor (Probability of following a link)
 
 # Mapping Rarities to Sounds
 RARITY_SOUNDS = {
-    "Divine": "sounds/divine.mp3",
-    "Mythic": "sounds/mythic.mp3",
+    "Exotic": "sounds/exotic.mp3",
     "Legendary": "sounds/legendary.mp3",
+    "Epic": "sounds/epic.mp3",
+    "Rare": "sounds/rare.mp3",
+    "Uncommon": "sounds/uncommon.mp3",
     "Common": "sounds/common.mp3"
 }
 
@@ -61,22 +67,64 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Global cache to keep VC joins fast (O(1) lookup)
 user_rarity_cache = {}
 
-@tasks.loop(hours=1)
+
+@tasks.loop(seconds=30)
 async def update_rarity_cache():
-    """Background task to run the Linear Algebra once an hour."""
     global user_rarity_cache
+    
+    # 1. Define the Guild immediately
+    # Replace the numbers below with your actual Server ID
+    GUILD_ID = 123456789012345678  
+    guild = bot.get_guild(GUILD_ID)
+    
+    if not guild:
+        print("⚠️ Could not find the guild. Check your GUILD_ID!")
+        return
+
     scores = calculate_pagerank()
-    if not scores: return
+    if not scores: 
+        return
 
     total = len(scores)
     new_cache = {}
+
+    # 2. Define the roles list for cleanup
+    all_rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
+    all_roles = [discord.utils.get(guild.roles, name=n) for n in all_rarity_names]
+
     for i, (user_id, score) in enumerate(scores):
         percentile = i / total
-        if percentile < 0.01: rarity = "Divine"
-        elif percentile < 0.10: rarity = "Mythic"
-        elif percentile < 0.25: rarity = "Legendary"
-        else: rarity = "Common"
+        
+        if percentile < 0.02:    # Top 2%
+            rarity = "Exotic"
+        elif percentile < 0.10:  # Next 8%
+            rarity = "Legendary"
+        elif percentile < 0.25:  # Next 15%
+            rarity = "Epic"
+        elif percentile < 0.45:  # Next 20%
+            rarity = "Rare"
+        elif percentile < 0.70:  # Next 25%
+            rarity = "Uncommon"
+        else:                   # Bottom 30%
+            rarity = "Common"
+            
         new_cache[user_id] = rarity
+
+        # --- LIVE ROLE ASSIGNMENT ---
+        member = guild.get_member(int(user_id))
+        if member:
+            # We fetch all possible rarity roles to ensure we clean up old ones
+            all_rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
+            all_roles = [discord.utils.get(guild.roles, name=n) for n in all_rarity_names]
+            
+            # Find the specific role for the current rarity
+            target_role = discord.utils.get(guild.roles, name=rarity)
+            
+            if target_role:
+                # Remove any existing rarity roles the user has
+                await member.remove_roles(*[r for r in all_roles if r and r in member.roles])
+                # Add the new one
+                await member.add_roles(target_role)
     
     user_rarity_cache = new_cache
     print("✅ Rarity cache updated via PageRank.")
@@ -134,4 +182,13 @@ async def on_voice_state_update(member, before, after):
             if sound_path and not vc_client.is_playing():
                 vc_client.play(discord.FFmpegPCMAudio(sound_path))
 
-bot.run(TOKEN)
+# --- 5. START THE BOT ---
+# Use the actual token string inside quotes
+TOKEN = os.getenv('DISCORD_TOKEN')
+GUILD_ID = int(os.getenv('GUILD_ID'))
+
+try:
+    print(f"🤖 Attempting login...")
+    bot.run(TOKEN)
+except Exception as e:
+    print(f"💥 Critical Error during bot.run: {e}")
