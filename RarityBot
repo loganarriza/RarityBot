@@ -112,9 +112,35 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 user_rarity_cache = {}
 
 @bot.command()
-async def sync_names(ctx):
-    update_user_map() # This calls the function we wrote earlier
-    await ctx.send("✅ Nicknames synced to the database!")
+async def update_user_map():
+    print("🚀 STARTING NICKNAME SYNC...")
+    
+    # Ensure table exists
+    cursor.execute("CREATE TABLE IF NOT EXISTS user_map (user_id TEXT PRIMARY KEY, nickname TEXT)")
+    
+    guild = bot.get_guild(GUILD_ID)
+    if not guild: 
+        print("❌ ERROR: Could not find the server (Guild). Check your GUILD_ID.")
+        return
+
+    member_count = len(guild.members)
+    print(f"👥 Found {member_count} members in server cache.")
+
+    counter = 0
+    for member in guild.members:
+        if member.bot: continue
+        
+        # We use 'db' because that's what you named your connection
+        cursor.execute("""
+            INSERT INTO user_map (user_id, nickname) 
+            VALUES (?, ?) 
+            ON CONFLICT(user_id) DO UPDATE SET nickname=excluded.nickname
+        """, (str(member.id), member.name))
+        counter += 1
+    
+    # CRITICAL: If you don't commit, the 0 stays 0 in DB Browser
+    db.commit() 
+    print(f"💾 SUCCESSFULLY COMMITTED {counter} usernames to user_map.")
 
 async def update_user_map():
     # 1. Ensure table exists
