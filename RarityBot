@@ -158,6 +158,15 @@ async def update_rarity_cache():
     print(f"\n--- 📊 {discord.utils.utcnow().strftime('%H:%M:%S')} RANKING UPDATE ---")
 
     for i, (user_id, distance) in enumerate(scores):
+        if member:
+            # --- NEW: AUTO-SYNC TO DATABASE ---
+            # This ensures DB Browser always has the latest name
+            cursor.execute("""
+                INSERT INTO user_map (user_id, nickname) 
+                VALUES (?, ?) 
+                ON CONFLICT(user_id) DO UPDATE SET nickname=excluded.nickname
+            """, (str(member.id), member.name))
+            db.commit() # Save it immediately
         # 2. Determine Rarity via Percentile
         percentile = i / total
         if percentile < 0.02:    rarity = "Exotic"
