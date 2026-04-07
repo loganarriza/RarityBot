@@ -51,11 +51,17 @@ async def play_rarity_sound(voice_client, rarity):
     full_path = os.path.join(folder_path, chosen_file)
 
     # Standard discord.py play logic
-    FFMPEG_PATH = "C:/ffmpeg/bin/ffmpeg.exe"
+    # Use a Raw String (r"") to handle the backslashes in your username
+    # THE FIX: Pointing to your actual Downloads folder
+    FFMPEG_PATH = r"C:\Users\logan\Downloads\ffmpeg\bin\ffmpeg.exe" 
 
-    source = discord.FFmpegPCMAudio(full_path, executable=FFMPEG_PATH)
-    voice_client.play(source)
-    print(f"🔊 Playing {rarity} sound: {chosen_file}")
+    try:
+        # We pass the executable path directly to the FFmpegPCMAudio class
+        source = discord.FFmpegPCMAudio(full_path, executable=FFMPEG_PATH)
+        voice_client.play(source)
+        print(f"🔊 Playing {rarity} sound: {chosen_file}")
+    except Exception as e:
+        print(f"❌ Playback Error: {e}")
 
 # --- 2. DATABASE SETUP ---
 db = sqlite3.connect(DATABASE_FILE)
