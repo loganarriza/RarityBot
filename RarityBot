@@ -3,6 +3,7 @@ import sqlite3
 import networkx as nx
 import asyncio
 import os
+import random
 from dotenv import load_dotenv
 # Load the variables from .env
 load_dotenv()
@@ -11,7 +12,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # We wrap this in int() because .env files treat everything as text (strings), 
 # but Discord IDs must be integers for the code to work.
 GUILD_ID = int(os.getenv('GUILD_ID'))
-from discord.ext import commands, tasks
+from discord.ext import commands, tasks 
 
 # --- 1. CONFIGURATION ---
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -19,15 +20,38 @@ GUILD_ID = int(os.getenv('GUILD_ID'))
 DATABASE_FILE = 'rarity_data.db'
 ALPHA = 0.85  # The Damping Factor (Probability of following a link)
 
-# Mapping Rarities to Sounds
-RARITY_SOUNDS = {
-    "Exotic": "sounds/exotic.mp3",
-    "Legendary": "sounds/legendary.mp3",
-    "Epic": "sounds/epic.mp3",
-    "Rare": "sounds/rare.mp3",
-    "Uncommon": "sounds/uncommon.mp3",
-    "Common": "sounds/common.mp3"
+# Update this to point to the FOLDERS instead of files
+RARITY_FOLDERS = {
+    "Exotic": "sounds/Exotic",
+    "Legendary": "sounds/Legendary",
+    "Epic": "sounds/Epic",
+    "Rare": "sounds/Rare",
+    "Uncommon": "sounds/Uncommon",
+    "Common": "sounds/Common"
 }
+
+async def play_rarity_sound(voice_client, rarity):
+    folder_path = RARITY_FOLDERS.get(rarity)
+    
+    if not folder_path or not os.path.exists(folder_path):
+        print(f"⚠️ Folder missing for rarity: {rarity}")
+        return
+
+    # Get a list of all mp3 files in that specific folder
+    available_sounds = [f for f in os.listdir(folder_path) if f.endswith('.wav') or f.endswith('.mp3')]
+
+    if not available_sounds:
+        print(f"Empty folder: {folder_path}")
+        return
+
+    # Pick a random one!
+    chosen_file = random.choice(available_sounds)
+    full_path = os.path.join(folder_path, chosen_file)
+
+    # Standard discord.py play logic
+    source = discord.FFmpegPCMAudio(full_path)
+    voice_client.play(source)
+    print(f"🔊 Playing {rarity} sound: {chosen_file}")
 
 # --- 2. DATABASE SETUP ---
 db = sqlite3.connect(DATABASE_FILE)
@@ -194,7 +218,7 @@ async def summon(ctx):
     if ctx.author.voice:
         channel = ctx.author.voice.channel
         await channel.connect()
-        await ctx.send(f"👁️ The Rarity Engine has entered **{channel.name}**.")
+        await ctx.send(f"RarityBot has entered **{channel.name}**.")
     else:
         await ctx.send("Join a Voice Channel first!")
 
@@ -216,7 +240,7 @@ async def on_voice_state_update(member, before, after):
         vc_client = member.guild.voice_client
         if vc_client and vc_client.channel == after.channel:
             rarity = user_rarity_cache.get(str(member.id), "Common")
-            sound_path = RARITY_SOUNDS.get(rarity)
+            sound_path = RARITY_FOLDERS.get(rarity)
             if sound_path and not vc_client.is_playing():
                 vc_client.play(discord.FFmpegPCMAudio(sound_path))
 
