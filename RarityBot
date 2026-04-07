@@ -116,21 +116,29 @@ async def sync_names(ctx):
     update_user_map() # This calls the function we wrote earlier
     await ctx.send("✅ Nicknames synced to the database!")
 
-def update_user_map():
+async def update_user_map():
+    # 1. Ensure table exists
+    cursor.execute("CREATE TABLE IF NOT EXISTS user_map (user_id TEXT PRIMARY KEY, nickname TEXT)")
+    
     guild = bot.get_guild(GUILD_ID)
-    if not guild: return
+    if not guild: 
+        print("⚠️ Could not find guild to sync names.")
+        return
 
+    print("🔄 Syncing usernames to DB...")
+    
+    # 2. Iterate through members
     for member in guild.members:
-        # Use displayName because it gets their nickname, 
-        # but falls back to their username if no nickname is set.
+        # Use member.name for the global username
+        # Use str(member.id) to ensure it matches your interactions table format
         cursor.execute("""
             INSERT INTO user_map (user_id, nickname) 
             VALUES (?, ?) 
             ON CONFLICT(user_id) DO UPDATE SET nickname=excluded.nickname
-        """, (str(member.id), member.display_name))
+        """, (str(member.id), member.name))
     
     db.commit()
-    print("📋 User map updated with nicknames!")
+    print(f"✅ User map updated with {len(guild.members)} usernames!")
 
 @tasks.loop(seconds=86400)  # Runs once every 24 hours
 async def update_rarity_cache():
