@@ -1,3 +1,5 @@
+from enum import member
+
 import discord
 import sqlite3
 import networkx as nx
@@ -278,8 +280,13 @@ async def on_voice_state_update(member, before, after):
             # This is the 'Secret Sauce' to avoiding 4006 errors
             await asyncio.sleep(1.2) 
             
-            # Get rarity from cache (default to Common)
-            rarity = user_rarity_cache.get(str(member.id), "Common")
+            # NEW WAY: Checks your actual Discord roles (more reliable for testing)
+            rarity = "Common" # Default
+            for role in member.roles:
+                if role.name in ["Exotic", "Legendary", "Epic", "Rare", "Uncommon"]:
+                    rarity = role.name
+                    break
+            print(f"✨ Identified {member.name} as {rarity}")
             
             # This calls your play_rarity_sound function we built earlier
             await play_rarity_sound(vc, rarity)
@@ -288,9 +295,6 @@ async def on_voice_state_update(member, before, after):
             while vc.is_playing():
                 await asyncio.sleep(0.5)
             
-            # Clean exit
-            await vc.disconnect()
-            print(f"👋 Disconnected from {after.channel.name}")
 
         except discord.ClientException as e:
             print(f"⚠️ Voice Client busy: {e}")
