@@ -5,6 +5,8 @@ import asyncio
 import os
 import random
 from dotenv import load_dotenv
+
+processing_users = set()
 # Load the variables from .env
 load_dotenv()
 
@@ -234,57 +236,65 @@ async def summon(ctx):
 @bot.event
 async def on_voice_state_update(member, before, after):
     """The 'Entry Frag' - Records interaction, joins VC, and plays random sound."""
-    
     if member.bot: return
 
-    # Triggered when someone joins a voice channel (was not in one before)
+    # Only trigger when joining a channel (was not in one before)
     if before.channel is None and after.channel is not None:
         
-        # 1. TRACKING LOGIC: Record high-weight interaction in DB
+        # --- LOCK LOGIC: Prevent '4006' Session Errors ---
+        if member.id in processing_users:
+            return 
+        processing_users.add(member.id)
+        # ------------------------------------------------
+
         try:
+            # 1. TRACKING LOGIC: Record high-weight interaction in DB
+            # Pointing to "SERVER" as the central hub for PageRank
             cursor.execute(
                 "INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)",
-                (str(member.id), "SERVER", 'VC_JOIN', 5.0) # Using "SERVER" as hub
+                (str(member.id), "SERVER", 'VC_JOIN', 5.0)
             )
             db.commit()
             print(f"📊 Recorded VC Join for {member.name}")
-        except Exception as e:
-            print(f"❌ DB Error: {e}")
 
-        # 2. AUDIO LOGIC: Bot joins and plays sound
-        try:
-            # Check if the bot is already in a voice channel in this server
+            # 2. AUDIO LOGIC: Bot joins and plays sound
+            # Check if bot is already connected in this guild
             vc = discord.utils.get(bot.voice_clients, guild=member.guild)
 
             if not vc:
-                # If not connected anywhere, join the user's channel
+                # Fresh connection
                 vc = await after.channel.connect()
             elif vc.channel != after.channel:
-                # If connected to a different channel, move to the user's channel
+                # Move to the user if already in a different channel
                 await vc.move_to(after.channel)
             
-            # If the bot is already in the correct channel, we just use 'vc' as is
+            # CRITICAL: Wait for the handshake to stabilize before playing
+            # This is the 'Secret Sauce' to avoiding 4006 errors
+            await asyncio.sleep(1.2) 
             
-            # Get the rarity from cache (defaults to Common)
+            # Get rarity from cache (default to Common)
             rarity = user_rarity_cache.get(str(member.id), "Common")
             
-            # Use your random folder picker logic
-            # This function should handle the FFmpeg path we discussed
+            # This calls your play_rarity_sound function we built earlier
             await play_rarity_sound(vc, rarity)
             
-            # Wait for sound to finish, then leave
-            # We use a short sleep to prevent 'busy-waiting' that spikes CPU
+            # Wait for sound to finish
             while vc.is_playing():
                 await asyncio.sleep(0.5)
             
+            # Clean exit
             await vc.disconnect()
-            
-        except discord.ClientException:
-            # Catching rare race conditions where the bot is mid-connection
-            print(f"⚠️ Voice Client Exception: Already attempting a connection.")
+            print(f"👋 Disconnected from {after.channel.name}")
+
+        except discord.ClientException as e:
+            print(f"⚠️ Voice Client busy: {e}")
         except Exception as e:
             print(f"🔊 Audio Logic Error: {e}")
-
+        finally:
+            # Release the lock after a short buffer
+            await asyncio.sleep(2)
+            processing_users.discard(member.id)
+            
 # --- 5. START THE BOT ---
 # Use the actual token string inside quotes
 TOKEN = os.getenv('DISCORD_TOKEN')
