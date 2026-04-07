@@ -49,7 +49,9 @@ async def play_rarity_sound(voice_client, rarity):
     full_path = os.path.join(folder_path, chosen_file)
 
     # Standard discord.py play logic
-    source = discord.FFmpegPCMAudio(full_path)
+    FFMPEG_PATH = "C:/Downloads/ffmpeg/bin/ffmpeg.exe" 
+
+    source = discord.FFmpegPCMAudio(full_path, executable=FFMPEG_PATH)
     voice_client.play(source)
     print(f"🔊 Playing {rarity} sound: {chosen_file}")
 
@@ -232,6 +234,7 @@ async def summon(ctx):
 @bot.event
 async def on_voice_state_update(member, before, after):
     """The 'Entry Frag' - Records interaction, joins VC, and plays random sound."""
+    
     if member.bot: return
 
     # Triggered when someone joins a voice channel (was not in one before)
@@ -250,26 +253,37 @@ async def on_voice_state_update(member, before, after):
 
         # 2. AUDIO LOGIC: Bot joins and plays sound
         try:
-            # Bot joins the channel the user just entered
-            vc = await after.channel.connect()
+            # Check if the bot is already in a voice channel in this server
+            vc = discord.utils.get(bot.voice_clients, guild=member.guild)
+
+            if not vc:
+                # If not connected anywhere, join the user's channel
+                vc = await after.channel.connect()
+            elif vc.channel != after.channel:
+                # If connected to a different channel, move to the user's channel
+                await vc.move_to(after.channel)
+            
+            # If the bot is already in the correct channel, we just use 'vc' as is
             
             # Get the rarity from cache (defaults to Common)
             rarity = user_rarity_cache.get(str(member.id), "Common")
             
             # Use your random folder picker logic
+            # This function should handle the FFmpeg path we discussed
             await play_rarity_sound(vc, rarity)
             
             # Wait for sound to finish, then leave
+            # We use a short sleep to prevent 'busy-waiting' that spikes CPU
             while vc.is_playing():
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
             
             await vc.disconnect()
             
         except discord.ClientException:
-            # This happens if the bot is already in a channel elsewhere
-            print(f"⚠️ Bot is already connected to a voice channel.")
+            # Catching rare race conditions where the bot is mid-connection
+            print(f"⚠️ Voice Client Exception: Already attempting a connection.")
         except Exception as e:
-            print(f"🔊 Audio Error: {e}")
+            print(f"🔊 Audio Logic Error: {e}")
 
 # --- 5. START THE BOT ---
 # Use the actual token string inside quotes
