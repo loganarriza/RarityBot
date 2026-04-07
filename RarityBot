@@ -112,6 +112,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 user_rarity_cache = {}
 
 @bot.command()
+async def sync_names(ctx):  # <--- You probably missed 'ctx' here!
+    await update_user_map() # Make sure to 'await' it if it's an async function
+    await ctx.send("✅ Nicknames synced to the database!")
+    
+@bot.command()
 async def update_user_map():
     print("🚀 STARTING NICKNAME SYNC...")
     
