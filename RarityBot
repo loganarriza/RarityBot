@@ -111,31 +111,27 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Global cache to keep VC joins fast (O(1) lookup)
 user_rarity_cache = {}
 
+# --- THIS IS THE COMMAND YOU TYPE IN DISCORD ---
 @bot.command()
-async def sync_names(ctx):  # <--- You probably missed 'ctx' here!
-    await update_user_map() # Make sure to 'await' it if it's an async function
+async def sync_names(ctx):
+    await update_user_map() 
     await ctx.send("✅ Nicknames synced to the database!")
-    
-@bot.command()
+
+# --- THIS IS JUST A REGULAR FUNCTION (NO @bot.command here) ---
 async def update_user_map():
     print("🚀 STARTING NICKNAME SYNC...")
     
-    # Ensure table exists
     cursor.execute("CREATE TABLE IF NOT EXISTS user_map (user_id TEXT PRIMARY KEY, nickname TEXT)")
     
     guild = bot.get_guild(GUILD_ID)
     if not guild: 
-        print("❌ ERROR: Could not find the server (Guild). Check your GUILD_ID.")
+        print("❌ ERROR: Could not find the server. Check GUILD_ID.")
         return
-
-    member_count = len(guild.members)
-    print(f"👥 Found {member_count} members in server cache.")
 
     counter = 0
     for member in guild.members:
         if member.bot: continue
         
-        # We use 'db' because that's what you named your connection
         cursor.execute("""
             INSERT INTO user_map (user_id, nickname) 
             VALUES (?, ?) 
@@ -143,7 +139,6 @@ async def update_user_map():
         """, (str(member.id), member.name))
         counter += 1
     
-    # CRITICAL: If you don't commit, the 0 stays 0 in DB Browser
     db.commit() 
     print(f"💾 SUCCESSFULLY COMMITTED {counter} usernames to user_map.")
 
@@ -271,6 +266,7 @@ async def on_ready():
 
     if not update_rarity_cache.is_running():
         update_rarity_cache.start()
+    await update_user_map() # Run the sync as soon as the bot wakes up
 
 @bot.event
 async def on_member_join(member):
