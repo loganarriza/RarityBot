@@ -282,7 +282,7 @@ async def on_ready():
         print("🚀 Rarity background task started.")
 
     print("✨ Genesis Sweep and Sync Complete. Bot is fully functional.")
-    
+
 @bot.event
 async def on_member_join(member):
     """Assigns Common role to new members immediately."""
@@ -294,6 +294,15 @@ async def on_member_join(member):
 @bot.event
 async def on_message(message):
     if message.author.bot: return
+    
+    # --- NEW: OMIT MUDAE CHANNEL ---
+    # Replace '123456789' with the actual ID of your Mudae/Bot channel
+    # You can get this by right-clicking the channel in Discord -> Copy ID
+    OMITTED_CHANNELS = [816872277861466112, 1491186717644951602] 
+    
+    if message.channel.id in OMITTED_CHANNELS:
+        return # Skip logging entirely for this channel
+    # -------------------------------
     
     author_id = str(message.author.id)
     target_id = "SERVER"
