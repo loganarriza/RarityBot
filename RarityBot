@@ -168,26 +168,42 @@ async def on_ready():
     
     guild = bot.get_guild(GUILD_ID)
     if guild:
-        # Define the rarity roles we care about
-        rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
-        common_role = discord.utils.get(guild.roles, name="Common")
+        # 1. Get every ID that has actually done something (The 'Ranked' Pool)
+        cursor.execute("SELECT DISTINCT source FROM interactions")
+        # We store these as strings because Discord IDs in Python are often handled as strings or ints
+        ranked_ids = {str(row[0]) for row in cursor.fetchall()}
         
-        if common_role:
-            print("🛠️ Genesis Sweep: Checking for unranked users...")
-            for member in guild.members:
-                if member.bot: continue
-                
-                # Check if the member already has ANY of the rarity roles
-                has_rarity = any(role.name in rarity_names for role in member.roles)
-                
-                # If they have no rarity role, they are a 'new' data point
-                if not has_rarity:
-                    await member.add_roles(common_role)
-                    print(f"✅ Assigned Common to {member.name}")
-    
+        unranked_role = discord.utils.get(guild.roles, name="Unranked")
+        rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
+        rarity_roles = [discord.utils.get(guild.roles, name=n) for n in rarity_names]
+
+        print("🔍 Syncing server roles with Database activity...")
+        
+        # 2. Iterate through every human in the server
+        for member in guild.members:
+            if member.bot: continue
+            
+            user_id = str(member.id)
+            
+            if user_id not in ranked_ids:
+                # If they ARE NOT in the database, they must be Unranked
+                # Check if they already have 'Unranked' to avoid redundant API calls
+                if unranked_role not in member.roles:
+                    # Strip any accidental rarity roles (like 'Common')
+                    roles_to_remove = [r for r in rarity_roles if r and r in member.roles]
+                    if roles_to_remove:
+                        await member.remove_roles(*roles_to_remove)
+                    
+                    await member.add_roles(unranked_role)
+                    print(f"⚪ {member.name.ljust(15)} | Reset to Unranked (Not in DB)")
+            else:
+                # If they ARE in the database, the update_rarity_cache task 
+                # will handle their specific rarity in its next 30-second cycle.
+                pass
+
     if not update_rarity_cache.is_running():
         update_rarity_cache.start()
-
+        
 @bot.event
 async def on_member_join(member):
     """Assigns Common role to new members immediately."""
