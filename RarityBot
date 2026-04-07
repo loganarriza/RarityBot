@@ -227,7 +227,7 @@ async def on_message(message):
     
     # Updated to include 'MESSAGE' type
     cursor.execute("INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)", 
-                   (author_id, target_id, 'MESSAGE', 1.0))
+                   (author_id, target_id, 'MESSAGE', 2.5))
     db.commit()
     await bot.process_commands(message)
     
