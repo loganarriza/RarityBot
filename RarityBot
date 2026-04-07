@@ -73,28 +73,34 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS interactions
                (source TEXT, target TEXT, type TEXT, weight REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 db.commit()
 
-# --- 3. THE MATH ENGINE (PAGERANK) ---
-def calculate_pagerank():
-    """Calculates the Principal Eigenvector of the social graph."""
-    # Pull the last 7 days of data to keep rarities 'fresh'
-    cursor.execute("""
-        SELECT source, target, SUM(weight) 
-        FROM interactions 
-        WHERE timestamp > datetime('now', '-7 days') 
-        GROUP BY source, target
-    """)
-    data = cursor.fetchall()
+def calculate_deviation_rarity():
+    # 1. Get total weights for every user
+    cursor.execute("SELECT source, SUM(weight) as total_activity FROM interactions GROUP BY source")
+    data = cursor.fetchall() 
     
-    if not data:
-        return {}
+    if not data: return []
 
-    G = nx.DiGraph()
-    for src, tgt, w in data:
-        G.add_edge(src, tgt, weight=w)
+    # 2. Find the 'Alpha' (The highest score currently in the DB)
+    # We filter out 'SERVER' so the alpha is always a human
+    human_data = [row for row in data if row[0] != "SERVER"]
+    if not human_data: return []
     
-    # This is the Eigen-solver. It returns a dict of {user_id: score}
-    scores = nx.pagerank(G, weight='weight', alpha=ALPHA)
-    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    alpha_id, alpha_score = max(human_data, key=lambda x: x[1])
+    print(f"👑 Current Alpha is {alpha_id} with {alpha_score} points.")
+
+    rarity_scores = []
+    for user_id, weight in human_data:
+        # 3. REVERSE LOGIC: 
+        # Low activity relative to the Alpha = High Rarity (Exotic)
+        # High activity relative to the Alpha = Low Rarity (Common)
+        
+        # This score increases the further you are from the Alpha's activity
+        distance = (alpha_score - weight) / alpha_score
+        rarity_scores.append((user_id, distance))
+
+    # Sort so the largest distance (the most inactive) is at the top (Exotic)
+    rarity_scores.sort(key=lambda x: x[1], reverse=True)
+    return rarity_scores
 
 # --- 4. THE BOT LOGIC ---
 intents = discord.Intents.all()
@@ -106,81 +112,54 @@ user_rarity_cache = {}
 
 @tasks.loop(seconds=30)
 async def update_rarity_cache():
+    await bot.wait_until_ready()
     global user_rarity_cache
     
-    # Define the Guild immediately
-    # Replace the numbers below with your actual Server ID
-    # Wait until the bot is fully connected to Discord
-    await bot.wait_until_ready()
-    GUILD_ID = int(os.getenv('GUILD_ID'))
     guild = bot.get_guild(GUILD_ID)
-    
-    if not guild:
-        print("⚠️ Could not find the guild. Check your GUILD_ID!")
-        return
+    if not guild: return
 
-    scores = calculate_pagerank()
-    if not scores: 
-        return
+    # 1. Run the "Reverse Rarity" math
+    scores = calculate_deviation_rarity() # Your new Alpha-distance function
+    if not scores: return
 
     total = len(scores)
     new_cache = {}
+    
+    print(f"\n--- 📊 {discord.utils.utcnow().strftime('%H:%M:%S')} RANKING UPDATE ---")
 
-    # 2. Define the roles list for cleanup
-    all_rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
-    all_roles = [discord.utils.get(guild.roles, name=n) for n in all_rarity_names]
-    # Filter out 'SERVER' from the score list before calculating percentiles
-    human_scores = [s for s in scores if s[0] != "SERVER"]
-    total = len(human_scores)
-
-    for i, (user_id, score) in enumerate(human_scores):
-        # Now 'i' correctly represents the rank among humans, and 'total' is the count of human users
-        if user_id == "SERVER" or user_id == "UNKNOWN" or user_id == "269758345357819904":
-            continue
-        
+    for i, (user_id, distance) in enumerate(scores):
+        # 2. Determine Rarity via Percentile
         percentile = i / total
-        
-        if percentile < 0.02:    # Top 2%
-            rarity = "Exotic"
-        elif percentile < 0.10:  # Next 8%
-            rarity = "Legendary"
-        elif percentile < 0.25:  # Next 15%
-            rarity = "Epic"
-        elif percentile < 0.45:  # Next 20%
-            rarity = "Rare"
-        elif percentile < 0.70:  # Next 25%
-            rarity = "Uncommon"
-        else:                   # Bottom 30%
-            rarity = "Common"
-            
-        new_cache[user_id] = rarity
+        if percentile < 0.02:    rarity = "Exotic"
+        elif percentile < 0.10:  rarity = "Legendary"
+        elif percentile < 0.25:  rarity = "Epic"
+        elif percentile < 0.45:  rarity = "Rare"
+        elif percentile < 0.70:  rarity = "Uncommon"
+        else:                   rarity = "Common"
 
-        # --- LIVE ROLE ASSIGNMENT ---
+        new_cache[user_id] = rarity
+        
+        # 3. Handle Discord Role Assignment
         member = guild.get_member(int(user_id))
-        if member:
-            try:
-                # Get the roles
+        if member and not member.bot:
+            old_rarity = user_rarity_cache.get(user_id)
+            
+            # Only trigger an update/print if their rank actually CHANGED
+            if old_rarity != rarity:
+                target_role = discord.utils.get(guild.roles, name=rarity)
                 all_rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
                 all_roles = [discord.utils.get(guild.roles, name=n) for n in all_rarity_names]
-                target_role = discord.utils.get(guild.roles, name=rarity)
-
+                
                 if target_role:
-                    # Only remove/add if they don't already have the correct role
-                    # This saves API calls and prevents 503s!
-                    if target_role not in member.roles:
-                        roles_to_remove = [r for r in all_roles if r and r in member.roles]
-                        if roles_to_remove:
-                            await member.remove_roles(*roles_to_remove)
-                        await member.add_roles(target_role)
-                        
-            except discord.HTTPException as e:
-                # This catches 503, 500, and 429 (rate limits)
-                print(f"⚠️ Discord API is struggling (Status {e.status}). Skipping {member.name} for now.")
-                continue
-    
-    user_rarity_cache = new_cache
-    print("✅ Rarity cache updated via PageRank.")
+                    await member.remove_roles(*[r for r in all_roles if r and r in member.roles])
+                    await member.add_roles(target_role)
+                    
+                    # 4. THE LIVE PRINT: Show the "Alpha Distance"
+                    # Score is rounded to 4 decimal places for cleanliness
+                    print(f"✨ ROLE CHANGE: {member.name.ljust(15)} | {str(old_rarity).rjust(10)} -> {rarity.ljust(10)} | Dist: {distance:.4f}")
 
+    user_rarity_cache = new_cache
+    
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
@@ -257,7 +236,6 @@ async def on_voice_state_update(member, before, after):
 
         try:
             # 1. TRACKING LOGIC: Record high-weight interaction in DB
-            # Pointing to "SERVER" as the central hub for PageRank
             cursor.execute(
                 "INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)",
                 (str(member.id), "SERVER", 'VC_JOIN', 5.0)
