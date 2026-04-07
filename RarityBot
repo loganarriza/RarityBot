@@ -66,11 +66,9 @@ async def play_rarity_sound(voice_client, rarity):
         print(f"❌ Playback Error: {e}")
 
 # --- 2. DATABASE SETUP ---
-db = sqlite3.connect(DATABASE_FILE)
+db = sqlite3.connect(DATABASE_FILE, timeout=20) # Add a 20-second timeout
+db.execute('PRAGMA journal_mode=WAL;') # Enable Write-Ahead Logging
 cursor = db.cursor()
-# Added 'type' column here
-cursor.execute('''CREATE TABLE IF NOT EXISTS interactions 
-               (source TEXT, target TEXT, type TEXT, weight REAL, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 db.commit()
 
 def calculate_deviation_rarity():
@@ -184,6 +182,8 @@ async def update_rarity_cache():
     print(f"\n--- 📊 {discord.utils.utcnow().strftime('%H:%M:%S')} RANKING UPDATE ---")
 
     for i, (user_id, distance) in enumerate(scores):
+        # YOU MUST DEFINE MEMBER INSIDE THE LOOP
+        member = guild.get_member(int(user_id))
         if member:
             # --- NEW: AUTO-SYNC TO DATABASE ---
             # This ensures DB Browser always has the latest name
@@ -226,48 +226,63 @@ async def update_rarity_cache():
     user_rarity_cache = new_cache
 
 @bot.event
+@bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user}')
+    print(f'✅ Logged in as {bot.user}')
     
     guild = bot.get_guild(GUILD_ID)
-    if guild:
-        # 1. Get every ID that has actually done something (The 'Ranked' Pool)
-        cursor.execute("SELECT DISTINCT source FROM interactions")
-        # We store these as strings because Discord IDs in Python are often handled as strings or ints
-        ranked_ids = {str(row[0]) for row in cursor.fetchall()}
-        
-        unranked_role = discord.utils.get(guild.roles, name="Unranked")
-        rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
-        rarity_roles = [discord.utils.get(guild.roles, name=n) for n in rarity_names]
+    if not guild:
+        print("❌ ERROR: Guild not found. Check your GUILD_ID in the .env file.")
+        return
 
-        print("🔍 Syncing server roles with Database activity...")
-        
-        # 2. Iterate through every human in the server
+    # --- PHASE 1: NICKNAME SYNC ---
+    # We do this first so the DB Browser has names immediately
+    try:
+        print("🔄 Phase 1: Syncing usernames to database...")
+        await update_user_map() 
+    except sqlite3.OperationalError as e:
+        print(f"⚠️ Database busy during sync: {e}")
+
+    # --- PHASE 2: GENESIS ROLE SWEEP ---
+    # Moves people who have ZERO history in the DB to 'Unranked'
+    print("🔍 Phase 2: Running Genesis Role Sweep...")
+    
+    # Get all IDs that have actually talked/joined VC
+    cursor.execute("SELECT DISTINCT source FROM interactions")
+    ranked_ids = {str(row[0]) for row in cursor.fetchall()}
+    
+    unranked_role = discord.utils.get(guild.roles, name="Unranked")
+    rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
+    rarity_roles = [discord.utils.get(guild.roles, name=n) for n in rarity_names]
+
+    if unranked_role:
         for member in guild.members:
             if member.bot: continue
             
             user_id = str(member.id)
             
+            # If they aren't in the DB, they shouldn't have a rarity role yet
             if user_id not in ranked_ids:
-                # If they ARE NOT in the database, they must be Unranked
-                # Check if they already have 'Unranked' to avoid redundant API calls
                 if unranked_role not in member.roles:
-                    # Strip any accidental rarity roles (like 'Common')
+                    # Strip any accidental rarity roles
                     roles_to_remove = [r for r in rarity_roles if r and r in member.roles]
                     if roles_to_remove:
                         await member.remove_roles(*roles_to_remove)
                     
                     await member.add_roles(unranked_role)
-                    print(f"⚪ {member.name.ljust(15)} | Reset to Unranked (Not in DB)")
-            else:
-                # If they ARE in the database, the update_rarity_cache task 
-                # will handle their specific rarity in its next 30-second cycle.
-                pass
+                    print(f"⚪ {member.name} -> Set to Unranked")
+    else:
+        print("⚠️ Warning: 'Unranked' role not found in server settings.")
 
+    # --- PHASE 3: START BACKGROUND TASKS ---
+    # We wait 2 seconds to let the DB "breathe" before the loop starts
+    await asyncio.sleep(2)
     if not update_rarity_cache.is_running():
         update_rarity_cache.start()
-    await update_user_map() # Run the sync as soon as the bot wakes up
+        print("🚀 Rarity background task started.")
 
+    print("✨ Genesis Sweep and Sync Complete. Bot is fully functional.")
+    
 @bot.event
 async def on_member_join(member):
     """Assigns Common role to new members immediately."""
