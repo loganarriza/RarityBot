@@ -123,7 +123,7 @@ async def update_rarity_cache():
 
     for i, (user_id, score) in enumerate(human_scores):
         # Now 'i' correctly represents the rank among humans, and 'total' is the count of human users
-        if user_id == "SERVER":
+        if user_id == "SERVER" or user_id == "UNKNOWN" or user_id == "269758345357819904":
             continue
         
         percentile = i / total
@@ -231,25 +231,45 @@ async def summon(ctx):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    """The 'Entry Frag' - Records the interaction and plays rarity sound."""
+    """The 'Entry Frag' - Records interaction, joins VC, and plays random sound."""
     if member.bot: return
-    
-    # 1. TRACKING LOGIC: Record the VC Join in the DB
-    if before.channel is None and after.channel is not None:
-        # Record this as a high-weight interaction
-        cursor.execute("INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)",
-                       (str(member.id), str(after.channel.id), 'VC_JOIN', 5.0))
-        db.commit()
-        print(f"🔊 Recorded VC Join for {member.name}")
 
-    # 2. AUDIO LOGIC: Play sound if the bot is in the channel
+    # Triggered when someone joins a voice channel (was not in one before)
     if before.channel is None and after.channel is not None:
-        vc_client = member.guild.voice_client
-        if vc_client and vc_client.channel == after.channel:
+        
+        # 1. TRACKING LOGIC: Record high-weight interaction in DB
+        try:
+            cursor.execute(
+                "INSERT INTO interactions (source, target, type, weight) VALUES (?, ?, ?, ?)",
+                (str(member.id), "SERVER", 'VC_JOIN', 5.0) # Using "SERVER" as hub
+            )
+            db.commit()
+            print(f"📊 Recorded VC Join for {member.name}")
+        except Exception as e:
+            print(f"❌ DB Error: {e}")
+
+        # 2. AUDIO LOGIC: Bot joins and plays sound
+        try:
+            # Bot joins the channel the user just entered
+            vc = await after.channel.connect()
+            
+            # Get the rarity from cache (defaults to Common)
             rarity = user_rarity_cache.get(str(member.id), "Common")
-            sound_path = RARITY_FOLDERS.get(rarity)
-            if sound_path and not vc_client.is_playing():
-                vc_client.play(discord.FFmpegPCMAudio(sound_path))
+            
+            # Use your random folder picker logic
+            await play_rarity_sound(vc, rarity)
+            
+            # Wait for sound to finish, then leave
+            while vc.is_playing():
+                await asyncio.sleep(1)
+            
+            await vc.disconnect()
+            
+        except discord.ClientException:
+            # This happens if the bot is already in a channel elsewhere
+            print(f"⚠️ Bot is already connected to a voice channel.")
+        except Exception as e:
+            print(f"🔊 Audio Error: {e}")
 
 # --- 5. START THE BOT ---
 # Use the actual token string inside quotes
