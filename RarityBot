@@ -108,9 +108,9 @@ user_rarity_cache = {}
 async def update_rarity_cache():
     global user_rarity_cache
     
-    # 1. Define the Guild immediately
+    # Define the Guild immediately
     # Replace the numbers below with your actual Server ID
-    # 1. NEW: Wait until the bot is fully connected to Discord
+    # Wait until the bot is fully connected to Discord
     await bot.wait_until_ready()
     GUILD_ID = int(os.getenv('GUILD_ID'))
     guild = bot.get_guild(GUILD_ID)
