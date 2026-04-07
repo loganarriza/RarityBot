@@ -111,8 +111,28 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Global cache to keep VC joins fast (O(1) lookup)
 user_rarity_cache = {}
 
+@bot.command()
+async def sync_names(ctx):
+    update_user_map() # This calls the function we wrote earlier
+    await ctx.send("✅ Nicknames synced to the database!")
 
-@tasks.loop(seconds=30)
+def update_user_map():
+    guild = bot.get_guild(GUILD_ID)
+    if not guild: return
+
+    for member in guild.members:
+        # Use displayName because it gets their nickname, 
+        # but falls back to their username if no nickname is set.
+        cursor.execute("""
+            INSERT INTO user_map (user_id, nickname) 
+            VALUES (?, ?) 
+            ON CONFLICT(user_id) DO UPDATE SET nickname=excluded.nickname
+        """, (str(member.id), member.display_name))
+    
+    db.commit()
+    print("📋 User map updated with nicknames!")
+
+@tasks.loop(days=1)  # Runs once every 24 hours
 async def update_rarity_cache():
     await bot.wait_until_ready()
     global user_rarity_cache
@@ -203,7 +223,7 @@ async def on_ready():
 
     if not update_rarity_cache.is_running():
         update_rarity_cache.start()
-        
+
 @bot.event
 async def on_member_join(member):
     """Assigns Common role to new members immediately."""
