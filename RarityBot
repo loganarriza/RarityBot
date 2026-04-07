@@ -132,7 +132,7 @@ def update_user_map():
     db.commit()
     print("📋 User map updated with nicknames!")
 
-@tasks.loop(days=1)  # Runs once every 24 hours
+@tasks.loop(seconds=86400)  # Runs once every 24 hours
 async def update_rarity_cache():
     await bot.wait_until_ready()
     global user_rarity_cache
