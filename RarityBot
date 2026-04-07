@@ -74,31 +74,33 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS interactions
 db.commit()
 
 def calculate_deviation_rarity():
-    # 1. Get total weights for every user
-    cursor.execute("SELECT source, SUM(weight) as total_activity FROM interactions GROUP BY source")
-    data = cursor.fetchall() 
+    # We use the Exponential Decay formula directly in the SQL
+    # 0.0077 is the lambda for a ~90 day half-life
+    decay_query = """
+    SELECT source, 
+           SUM(weight * exp(-0.0077 * (julianday('now') - julianday(timestamp)))) as decayed_weight
+    FROM interactions 
+    WHERE timestamp > datetime('now', '-365 days') -- Ignore truly ancient data
+    GROUP BY source
+    """
+    cursor.execute(decay_query)
+    data = cursor.fetchall()
     
     if not data: return []
 
-    # 2. Find the 'Alpha' (The highest score currently in the DB)
-    # We filter out 'SERVER' so the alpha is always a human
     human_data = [row for row in data if row[0] != "SERVER"]
     if not human_data: return []
     
+    # Alpha is the person with the highest DECAYED weight (most active recently)
     alpha_id, alpha_score = max(human_data, key=lambda x: x[1])
-    print(f"👑 Current Alpha is {alpha_id} with {alpha_score} points.")
 
     rarity_scores = []
     for user_id, weight in human_data:
-        # 3. REVERSE LOGIC: 
-        # Low activity relative to the Alpha = High Rarity (Exotic)
-        # High activity relative to the Alpha = Low Rarity (Common)
-        
-        # This score increases the further you are from the Alpha's activity
+        # Distance from the active 'Alpha'
         distance = (alpha_score - weight) / alpha_score
         rarity_scores.append((user_id, distance))
 
-    # Sort so the largest distance (the most inactive) is at the top (Exotic)
+    # Sort: Highest distance (most decayed/inactive) = Exotic
     rarity_scores.sort(key=lambda x: x[1], reverse=True)
     return rarity_scores
 
@@ -159,7 +161,7 @@ async def update_rarity_cache():
                     print(f"✨ ROLE CHANGE: {member.name.ljust(15)} | {str(old_rarity).rjust(10)} -> {rarity.ljust(10)} | Dist: {distance:.4f}")
 
     user_rarity_cache = new_cache
-    
+
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
