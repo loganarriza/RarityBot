@@ -146,18 +146,25 @@ async def update_rarity_cache():
         # --- LIVE ROLE ASSIGNMENT ---
         member = guild.get_member(int(user_id))
         if member:
-            # We fetch all possible rarity roles to ensure we clean up old ones
-            all_rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
-            all_roles = [discord.utils.get(guild.roles, name=n) for n in all_rarity_names]
-            
-            # Find the specific role for the current rarity
-            target_role = discord.utils.get(guild.roles, name=rarity)
-            
-            if target_role:
-                # Remove any existing rarity roles the user has
-                await member.remove_roles(*[r for r in all_roles if r and r in member.roles])
-                # Add the new one
-                await member.add_roles(target_role)
+            try:
+                # Get the roles
+                all_rarity_names = ["Exotic", "Legendary", "Epic", "Rare", "Uncommon", "Common"]
+                all_roles = [discord.utils.get(guild.roles, name=n) for n in all_rarity_names]
+                target_role = discord.utils.get(guild.roles, name=rarity)
+
+                if target_role:
+                    # Only remove/add if they don't already have the correct role
+                    # This saves API calls and prevents 503s!
+                    if target_role not in member.roles:
+                        roles_to_remove = [r for r in all_roles if r and r in member.roles]
+                        if roles_to_remove:
+                            await member.remove_roles(*roles_to_remove)
+                        await member.add_roles(target_role)
+                        
+            except discord.HTTPException as e:
+                # This catches 503, 500, and 429 (rate limits)
+                print(f"⚠️ Discord API is struggling (Status {e.status}). Skipping {member.name} for now.")
+                continue
     
     user_rarity_cache = new_cache
     print("✅ Rarity cache updated via PageRank.")
