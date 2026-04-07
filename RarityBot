@@ -51,7 +51,7 @@ async def play_rarity_sound(voice_client, rarity):
     full_path = os.path.join(folder_path, chosen_file)
 
     # Standard discord.py play logic
-    FFMPEG_PATH = "C:/Downloads/ffmpeg/bin/ffmpeg.exe" 
+    FFMPEG_PATH = "C:/ffmpeg/bin/ffmpeg.exe"
 
     source = discord.FFmpegPCMAudio(full_path, executable=FFMPEG_PATH)
     voice_client.play(source)
@@ -294,7 +294,7 @@ async def on_voice_state_update(member, before, after):
             # Release the lock after a short buffer
             await asyncio.sleep(2)
             processing_users.discard(member.id)
-            
+
 # --- 5. START THE BOT ---
 # Use the actual token string inside quotes
 TOKEN = os.getenv('DISCORD_TOKEN')
